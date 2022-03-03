@@ -1,0 +1,53 @@
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(BAS)
+```
+
+### Load data
+
+
+```{r load-data}
+#load("movies.Rdata")
+```
+
+
+
+* * *
+
+## Part 1: Data
+
+
+* * *
+
+## Part 2: Data manipulation
+
+
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+
+
+* * *
+
+## Part 4: Modeling
+
+
+
+* * *
+
+## Part 5: Prediction
+
+
+
+* * *
+
+## Part 6: Conclusion
+
