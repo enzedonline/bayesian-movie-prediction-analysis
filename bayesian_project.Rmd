@@ -8,77 +8,840 @@ output:
     theme: yeti
     toc: yes
     keep_md: yes
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
-## Setup
+
+# Setup
+
 ```{r set_defaults, message=FALSE}
 # set defaults: cache chunks to speed compiling subsequent edits.
 knitr::opts_chunk$set(cache=TRUE, echo = TRUE)
 ```
 
-### Load packages
+## Load packages
 
-```{r load-packages, message = FALSE}
+```{r load-packages, message=FALSE}
 library(ggplot2)
 library(dplyr)
+library(tidyr)
 library(statsr)
 library(BAS)
+library(MASS)
 library(ggthemes)
 library(plotly)
 library(kableExtra)
+library(moments)
 ```
 
-### Load data
-
+## Load data
 
 ```{r load-data}
 load("movies.Rdata")
 ```
 
+------------------------------------------------------------------------
+
+# Part 1: Data
+
+## Type of Study
+
+This is an observational study due to the nature of data collection. It only establishes associations and trends and cannot be used to infer causality.
+
+## Generalizability & Potential Bias
+
+No random assignment was used in the surveys and the sampling methodology is randomised. 
+
+It can be considered to be generalisable to the entire population of movies that appear on Rotten Tomatoes and IMDB but with consideration that this does not represent the general population of movies.
+
+Note also, that when considering audience scores, IMDB ratings and critics scores, these are representative of people that both use that site and actively contribute to ratings. It is not a representation of the population at large.
 
 
-* * *
+------------------------------------------------------------------------
 
-## Part 1: Data
-
-
-* * *
-
-## Part 2: Data manipulation
+# Part 2: Data manipulation
 
 ```{r create_new_vars}
+# Add new variables
 movies2 <- movies %>%
     mutate(feature_film = factor(title_type == 'Feature Film', labels=c("No", "Yes"))) %>%
     mutate(drama  = factor(genre == 'Drama', labels=c("No", "Yes"))) %>%
     mutate(mpaa_rating_R = factor(mpaa_rating == 'R', labels=c("No", "Yes"))) %>%
     mutate(oscar_season = factor(thtr_rel_month %in% 10:12, labels=c("No", "Yes"))) %>%
     mutate(summer_season = factor(thtr_rel_month %in% 5:8, labels=c("No", "Yes"))) 
+
+# Print sample of rows with new variable
 sample_n(movies2, 10) %>%
     select(title, feature_film:summer_season) %>%
     kbl() %>% 
     kable_styling(bootstrap_options = c("condensed"))
 
+# Drop unused columns, drop rows with NA's
+movies2 <- movies2 %>%
+    select(
+        audience_score, feature_film, drama, runtime, mpaa_rating_R, 
+        thtr_rel_year, oscar_season, summer_season, imdb_rating, imdb_num_votes, 
+        critics_score, best_pic_nom, best_pic_win, best_actor_win, best_actress_win,
+        best_dir_win, top200_box) %>% 
+    drop_na()
+
+```
+
+------------------------------------------------------------------------
+
+# Part 3: Exploratory data analysis
+
+Each of the new variables are boolean type, each to be examined against
+Audience Score. Since analysis methodology is the same for each, we create
+a function for summary stats and box plot.
+
+```{r summ_var}
+summ_var <- function(variable, description){
+    summ_list = list(
+        box = ggplot(data = movies2, aes(x=(!!as.name(variable)), y=audience_score)) + 
+            geom_boxplot(fill="lightblue") + 
+            theme_excel_new() +
+            xlab(description) +
+            ylab("Audience Score") +
+            ggtitle(paste("Audience Score vs.", description)) +
+            theme(
+                plot.margin = margin(0, 0, 0.5, 0.5, "cm"),
+                axis.title = element_text()
+        ),
+    
+    tbl = movies2 %>% group_by((!!as.name(variable))) %>% 
+        summarise(
+            count = n(),
+            min = min(audience_score), 
+            q25 = quantile(audience_score, 0.25), 
+            median = median(audience_score), 
+            q75 = quantile(audience_score, 0.75), 
+            max = max(audience_score),
+            mean = round(mean(audience_score),2), 
+            sd = round(sd(audience_score),2),
+            skew = round(skewness(audience_score),2)
+        ) %>%
+        kbl() %>% 
+        kable_styling(bootstrap_options = c("condensed"))
+    )
+}
+
+```
+
+------------------------------------------------------------------------
+
+## Feature Film
+
+------------------------------------------------------------------------
+
+```{r eda_feature_film}
+feature_film <- summ_var("feature_film", "Feature Film")
+```
+
+::: columns
+::: {.column width="38%"}
+```{r feature_filmbox, fig.height=3.3, fig.width=4}
+feature_film$box
+```
+:::
+
+::: {.column width="2%"}
+ 
+:::
+
+::: {.column width="60%"}
+```{r feature_filmtbl}
+feature_film$tbl
+```
+
+-   There is a much greater count of feature films reviewed
+-   Both mean and median are much greater for non-feature films, the
+    difference is greater than one feature-film SD
+-   The range is similar for both
+-   Variance is greater for feature films
+-   Feature films are mostly normally distributed while non-feature
+    films are heavily left-skewed.
+:::
+:::
+
+```{r feature_film_bayes, message=FALSE, warning=FALSE, echo=TRUE, include=FALSE}
+bi <- bayes_inference(y = audience_score, x = feature_film, data = movies2, 
+            statistic = "mean", type = "ht", null=0, alternative = "twosided"
+        )
+
+```
+
+```{r feature_film_bayes_code, eval=FALSE}
+bi <- bayes_inference(y = audience_score, x = feature_film, data = movies2, 
+            statistic = "mean", type = "ht", null=0, alternative = "twosided")
+
+```
+
+::: columns
+::: {.column width="38%"}
+```{r feature_film_bi, echo=FALSE, fig.height=3, fig.width=4}
+bi$plot
+```
+:::
+
+::: {.column width="2%"}
+ 
+:::
+
+::: {.column width="60%"}
+Hypotheses:<br> H1: mu_No = mu_Yes<br> H2: mu_No != mu_Yes<br>
+
+Priors:<br> P(H1) = 0.5 P(H2) = 0.5 <br>
+
+Results:<br> BF[H2:H1] = `r format(round(bi$BF, 4), scientific = F)`
+<br> P(H1\|data) = `r format(round(bi$post_H1, 4), scientific = F)` <br>
+P(H2\|data) = `r format(round(bi$post_H2, 4), scientific = F)` <br>
+
+Posterior summaries for under H2: <br> 95% Cred. Int.:
+(`r format(round(bi$ci, 4), scientific = F)`)
+:::
+:::
+
+The bayes inference output confirms that there is a significant
+difference in audience score between feature film and non-feature film.
+
+------------------------------------------------------------------------
+
+## Drama
+
+------------------------------------------------------------------------
+
+```{r eda_drama}
+drama <- summ_var("drama", "Drama")
+```
+
+::: columns
+::: {.column width="38%"}
+```{r dramabox, fig.height=3.3, fig.width=4}
+drama$box
+```
+:::
+
+::: {.column width="2%"}
+ 
+:::
+
+::: {.column width="60%"}
+```{r dramatbl}
+drama$tbl
+```
+
+-   There is a more even number of drama vs non-drama, though non-drama
+    is higher
+-   Both mean and median are higher for drama films, the
+    difference is approximately one half of the drama-film SD
+-   The range is similar for both
+-   Variance is slightly higher for non-drama films
+-   Non-drama films are mostly normally distributed while drama films
+    are mildly left-skewed.
+:::
+:::
+
+
+```{r drama_bayes, message=FALSE, warning=FALSE, echo=TRUE, include=FALSE}
+bi <- bayes_inference(y = audience_score, x = drama, data = movies2, 
+            statistic = "mean", type = "ht", null=0, alternative = "twosided"
+        )
+
+```
+
+```{r drama_bayes_code, eval=FALSE}
+bi <- bayes_inference(y = audience_score, x = drama, data = movies2, 
+            statistic = "mean", type = "ht", null=0, alternative = "twosided")
+
+```
+
+::: columns
+::: {.column width="38%"}
+```{r drama_bi, echo=FALSE, fig.height=3, fig.width=4}
+bi$plot
+```
+:::
+
+::: {.column width="2%"}
+ 
+:::
+
+::: {.column width="60%"}
+Hypotheses:<br> H1: mu_No = mu_Yes<br> H2: mu_No != mu_Yes<br>
+
+Priors:<br> P(H1) = 0.5 P(H2) = 0.5 <br>
+
+Results:<br> BF[H2:H1] = `r format(round(bi$BF, 4), scientific = F)`
+<br> P(H1\|data) = `r format(round(bi$post_H1, 4), scientific = F)` <br>
+P(H2\|data) = `r format(round(bi$post_H2, 4), scientific = F)` <br>
+
+Posterior summaries for under H2: <br> 95% Cred. Int.:
+(`r format(round(bi$ci, 4), scientific = F)`)
+:::
+:::
+
+
+The bayes inference output confirms that there is a significant
+difference in audience score between drama film and non-drama film with
+no overlap of zero in the credible interval.
+
+------------------------------------------------------------------------
+
+## MPAA Rating R
+
+------------------------------------------------------------------------
+
+```{r eda_mpaa_rating_R}
+mpaa_rating_R <- summ_var("mpaa_rating_R", "MPAA Rating R")
+```
+
+::: columns
+::: {.column width="38%"}
+```{r mpaa_rating_Rbox, fig.height=3.3, fig.width=4}
+mpaa_rating_R$box
+```
+:::
+
+::: {.column width="2%"}
+ 
+:::
+
+::: {.column width="60%"}
+```{r mpaa_rating_Rtbl}
+mpaa_rating_R$tbl
+```
+
+-   There is an approximately even number of R vs non-R movies
+-   Both mean and median are similar for both types of film
+-   The range is similar for both
+-   Variance is nearly identical
+-   Both film types show a small left-skew.
+:::
+:::
+
+```{r mpaa_rating_R_bayes, message=FALSE, warning=FALSE, echo=TRUE, include=FALSE}
+bi <- bayes_inference(y = audience_score, x = mpaa_rating_R, data = movies2, 
+            statistic = "mean", type = "ht", null=0, alternative = "twosided"
+        )
+
+```
+
+```{r mpaa_rating_R_bayes_code, eval=FALSE}
+bi <- bayes_inference(y = audience_score, x = mpaa_rating_R, data = movies2, 
+            statistic = "mean", type = "ht", null=0, alternative = "twosided")
+
+```
+
+::: columns
+::: {.column width="38%"}
+```{r mpaa_rating_R_bi, echo=FALSE, fig.height=3, fig.width=4}
+bi$plot
+```
+:::
+
+::: {.column width="2%"}
+ 
+:::
+
+::: {.column width="60%"}
+Hypotheses:<br> H1: mu_No = mu_Yes<br> H2: mu_No != mu_Yes<br>
+
+Priors:<br> P(H1) = 0.5 P(H2) = 0.5 <br>
+
+Results:<br> BF[H2:H1] = `r format(round(bi$BF, 4), scientific = F)`
+<br> P(H1\|data) = `r format(round(bi$post_H1, 4), scientific = F)` <br>
+P(H2\|data) = `r format(round(bi$post_H2, 4), scientific = F)` <br>
+
+Posterior summaries for under H2: <br> 95% Cred. Int.:
+(`r format(round(bi$ci, 4), scientific = F)`)
+:::
+:::
+
+The bayes inference output confirms a strong overlap between the two
+types of movies.
+
+------------------------------------------------------------------------
+
+## Oscar Season
+
+------------------------------------------------------------------------
+
+```{r eda_oscar_season}
+oscar_season <- summ_var("oscar_season", "Oscar Season")
+```
+
+::: columns
+::: {.column width="38%"}
+```{r oscar_seasonbox, fig.height=3.3, fig.width=4}
+oscar_season$box
+```
+:::
+
+::: {.column width="2%"}
+ 
+:::
+
+::: {.column width="60%"}
+```{r oscar_seasontbl}
+oscar_season$tbl
+```
+
+-   There is a much greater number of non-Oscar Season movies
+-   Both mean and median are roughly similar for both types of film
+-   The range is similar for both
+-   Variance is nearly identical
+-   Both film types show a small left-skew.
+:::
+:::
+
+```{r oscar_season_bayes, message=FALSE, warning=FALSE, echo=TRUE, include=FALSE}
+bi <- bayes_inference(y = audience_score, x = oscar_season, data = movies2, 
+            statistic = "mean", type = "ht", null=0, alternative = "twosided"
+        )
+
+```
+
+```{r oscar_season_bayes_code, eval=FALSE}
+bi <- bayes_inference(y = audience_score, x = oscar_season, data = movies2, 
+            statistic = "mean", type = "ht", null=0, alternative = "twosided")
+
+```
+
+::: columns
+::: {.column width="38%"}
+```{r oscar_season_bi, echo=FALSE, fig.height=3, fig.width=4}
+bi$plot
+```
+:::
+
+::: {.column width="2%"}
+ 
+:::
+
+::: {.column width="60%"}
+Hypotheses:<br> H1: mu_No = mu_Yes<br> H2: mu_No != mu_Yes<br>
+
+Priors:<br> P(H1) = 0.5 P(H2) = 0.5 <br>
+
+Results:<br> BF[H2:H1] = `r format(round(bi$BF, 4), scientific = F)`
+<br> P(H1\|data) = `r format(round(bi$post_H1, 4), scientific = F)` <br>
+P(H2\|data) = `r format(round(bi$post_H2, 4), scientific = F)` <br>
+
+Posterior summaries for under H2: <br> 95% Cred. Int.:
+(`r format(round(bi$ci, 4), scientific = F)`)
+:::
+:::
+
+The bayes inference output shows a higher rating for Oscar Season
+movies, however there is also significant overlap between the two types.
+
+------------------------------------------------------------------------
+
+## Summer Season
+
+------------------------------------------------------------------------
+
+```{r eda_summer_season}
+summer_season <- summ_var("summer_season", "Summer Season")
+```
+
+::: columns
+::: {.column width="38%"}
+```{r summer_seasonbox, fig.height=3.3, fig.width=4}
+summer_season$box
+```
+:::
+
+::: {.column width="2%"}
+ 
+:::
+
+::: {.column width="60%"}
+```{r summer_seasontbl}
+summer_season$tbl
+```
+
+-   There is a much greater number of non-Summer Season movies
+    (approximately 2:1)
+-   Both mean and median are roughly similar for both types of film
+-   The range is similar for both
+-   Variance is very similar
+-   Both types of film have a small left-skew.
+:::
+:::
+
+```{r summer_season_bayes, message=FALSE, warning=FALSE, echo=TRUE, include=FALSE}
+bi <- bayes_inference(y = audience_score, x = summer_season, data = movies2, 
+            statistic = "mean", type = "ht", null=0, alternative = "twosided"
+        )
+
+```
+
+```{r summer_season_bayes_code, eval=FALSE}
+bi <- bayes_inference(y = audience_score, x = summer_season, data = movies2, 
+            statistic = "mean", type = "ht", null=0, alternative = "twosided")
+
+```
+
+::: columns
+::: {.column width="38%"}
+```{r summer_season_bi, echo=FALSE, fig.height=3, fig.width=4}
+bi$plot
+```
+:::
+
+::: {.column width="2%"}
+ 
+:::
+
+::: {.column width="60%"}
+Hypotheses:<br> H1: mu_No = mu_Yes<br> H2: mu_No != mu_Yes<br>
+
+Priors:<br> P(H1) = 0.5 P(H2) = 0.5 <br>
+
+Results:<br> BF[H2:H1] = `r format(round(bi$BF, 4), scientific = F)`
+<br> P(H1\|data) = `r format(round(bi$post_H1, 4), scientific = F)` <br>
+P(H2\|data) = `r format(round(bi$post_H2, 4), scientific = F)` <br>
+
+Posterior summaries for under H2: <br> 95% Cred. Int.:
+(`r format(round(bi$ci, 4), scientific = F)`)
+:::
+:::
+
+The bayes inference output shows a slightly higher rating for Summer
+Season movies, however there is also significant overlap between the two
+types.
+
+---
+
+## Number of votes on IMDB
+
+---
+
+This variable has an extreme right skew distribution over a large range.
+
+::: {.columns}
+::: {.column width="50%"}
+
+```{r imdb_num_hist, fig.height=3.5}
+hist(movies2$imdb_num_votes)
 ```
 
 
-* * *
+:::
+::: {.column width="50%"}
 
-## Part 3: Exploratory data analysis
+```{r imdb_num_plot, fig.height=3}
+ggplot(data = movies2, aes(x=audience_score, y=imdb_num_votes)) + geom_point()
+```
+
+:::
+:::
+
+Taking the log of this variable normalises the distribution and the relationship with audience score.
+
+::: {.columns}
+::: {.column width="50%"}
+
+```{r imdb_num_log_hist, fig.height=3.5}
+hist(log(movies2$imdb_num_votes))
+```
 
 
+:::
+::: {.column width="50%"}
 
-* * *
+```{r imdb_num_log_plot, fig.height=3}
+ggplot(data = movies2, aes(x=audience_score, y=log(imdb_num_votes))) + geom_point()
+```
 
-## Part 4: Modeling
+:::
+:::
+
+For modelling, we will use the log of Number of votes on IMDB:
+
+```{r imdb_num_log}
+movies2 <- movies2 %>%
+    mutate(l_imdb_num_votes = log(imdb_num_votes)) %>%
+    select(-imdb_num_votes)
+```
+
+------------------------------------------------------------------------
+
+# Part 4: Modelling
+
+## Base Model
+
+We create an initial model using the `bas.lm` function from the `BAS` package. 
+
+Here we have 16 potential predictors. The total number of models is $2^{16}=65536$. 
+
+This can take a long time to process, so we can use the argument `method = MCMC` inside the `bas.lm` function to speed processing by only sampling most likely models. 
+
+We also use the Zellner-Siow cauchy prior (`prior = "ZS-null"`) for the prior distributions of the coefficients in this regression.
+
+We assume all variables have an equal likelihood of being included in the final model using the uniform distribution `modelprior = uniform()`.
+
+```{r full_model}
+m_movies <- bas.lm(audience_score ~ ., 
+                          data = movies2,
+                          prior = "ZS-null", 
+                          method = "MCMC",
+                          modelprior = uniform()
+                        )
+m_movies
+```
 
 
+## Model Diagnostics
 
-* * *
+### Posterior inclusion probabilities
 
-## Part 5: Prediction
+We will run the convergence plots to double-check the base model first:
+
+::: {.columns}
+::: {.column width="50%"}
+
+```{r converge_pip}
+diagnostics(m_movies, type="pip", col = "blue", pch = 16, cex = 1.5)
+```
+
+:::
+::: {.column width="50%"}
+
+```{r converge_model}
+diagnostics(m_movies, type="model", col = "blue", pch = 16, cex = 1.5)
+```
+
+:::
+:::
+
+The posterior inclusion & model probabilities converge well to the theoretical posterior inclusion probability.
+
+### Residuals Versus Fitted Values. 
+
+::: {.columns}
+::: {.column width="50%"}
+
+```{r diag_residuals}
+plot(m_movies, which = 1, add.smooth = F, 
+     ask = F, pch = 16, sub.caption="", caption="")
+abline(a = 0, b = 0, col = "darkgrey", lwd = 2)
+```
+
+:::
+::: {.column width="50%"}
+\
+\
+\
+\
+\
+\
+\
+Since the Best Predictive Model is the model whose predictions are closest to those given by BMA, we use BMA to check the residuals.
+
+For predictions over 25, there is a fairly even distribution of residuals, however this becomes skewed to the positive below that. Potential outliers are cases 126, 216 & 251.
+
+:::
+:::
+
+### Cumulative Sampled Probability
+
+::: {.columns}
+::: {.column width="50%"}
+
+```{r diag_csp, fig.height=5}
+plot(m_movies, which=2, add.smooth = F, sub.caption="", caption="")
+```
+
+:::
+::: {.column width="50%"}
+
+\
+\
+\
+\
+\
+\
+We can see that after we have discovered about 7,000 unique models with MCMC sampling, the probability is starting to level off after less than 100, indicating that these additional models have very small probability and do not contribute substantially to the posterior distribution. 
+
+These probabilities are proportional to the product of marginal likelihoods of models and priors, $p(data | M_m)p(M_m)$, rather than Monte Carlo frequencies.
 
 
+:::
+:::
 
-* * *
+### Model Complexity
 
-## Part 6: Conclusion
+::: {.columns}
+::: {.column width="50%"}
+
+```{r diag_complexity, fig.height=5}
+plot(m_movies, which=3, ask=F, caption="", sub.caption="")
+```
+
+:::
+::: {.column width="50%"}
+
+\
+\
+\
+\
+\
+\
+The models with 2 & 3 variables have both the lowest and highest BF, throwing the graph scale out. 
+
+The model selection methodology will remove these low values.
+
+:::
+:::
+
+### Marginal Inclusion Probability
+
+::: {.columns}
+::: {.column width="50%"}
+
+```{r diag_mip, fig.height=5}
+plot(m_movies, which = 4, ask = F, caption = "", sub.caption = "", 
+     col.in = "blue", col.ex = "darkgrey", lwd = 3)
+```
+
+:::
+::: {.column width="50%"}
+
+\
+\
+\
+\
+\
+\
+\
+Only two variables have marginal inclusion probabilities greater than 0.5: `imdb_rating` and `critics_score`. 
+
+Additionally, `runtime` has a value close to 0.5 and may be considered for the model.
+
+It should be kept in mind that low scores may be a result of multicollinearity.
+
+:::
+:::
+
+
+## Model Selection - Best Predictive Model
+
+Since the purpose of the model is to predict future audience movie scores, the approach used will be Best Predictive Model (BPM).
+
+```{r bpm}
+movies.BPM = predict(m_movies, estimator = "BPM")
+movies.BPM$best.vars
+```
+
+BPM estimation with the `predict` function tells us that only three significant variables exist for creating the best predictive model: `runtime`, `imdb_rating`, `critics_score`
+
+Using the `se.fit = TRUE` option with `predict` we can calculate standard deviations for the predictions or for the mean. Then we can use this as input for the `confint` function for the prediction object. Here we only show the results of the first 10 data points.
+
+```{r}
+movies.BPM = predict(m_movies, estimator = "BPM", se.fit = TRUE)
+movies.BPM.conf.fit = confint(movies.BPM, parm = "mean")
+movies.BPM.conf.pred = confint(movies.BPM, parm = "pred")
+head(cbind(movies.BPM$fit, movies.BPM.conf.fit, movies.BPM.conf.pred), 10)
+```
+
+The option `estimator = "BPM"` is not yet available in `coef()`, so we need to extract a vector of zeros and ones representing which variables are included in the BPM model.
+
+```{r bpm_vector}
+BPM = as.vector(which.matrix(m_movies$which[movies.BPM$best],
+                             m_movies$n.vars))
+BPM
+```
+
+Next, we will refit the model with `bas.lm` using the optional argument `bestmodel = BPM`. 
+
+We will also specify that want to have 1 model by setting `n.models = 1`. In this way, `bas.lm` starts with the BPM and fits only that model.
+
+```{r refit_model}
+movies.BPM = bas.lm(audience_score ~ ., data = movies2,
+                      prior = "ZS-null",
+                      modelprior = uniform(),
+                      bestmodel = BPM, n.models = 1)
+```
+
+Now, since we have only one model in our new object representing the BPM, we can use the `coef` function to obtain the summaries.
+
+```{r bpm_coef}
+movies.BPM.coef <- coef(movies.BPM)
+movies.BPM.coef
+par(mfrow = c(1, 3))
+plot(movies.BPM.coef, subset = c(4,10,9))
+
+```
+
+Here, we see the model predicts a small negative correlation with runtime and audience score, a small positive correlation with critics score, while the greatest factor in prediction is the IMDB rating.
+
+From the above table, the approximate predictions at the 95% credible interval are:
+
+- for each minute of movie length, we would expect a **decrease** in audience score of between 0.095 and 0.013
+- for each point on critic's score, we would expect the audience score to increase by between 0.027 and 0.113
+- for each point on IMDB rating, we would expect to see an audience score increase by between 13.83 and 16.09
+
+------------------------------------------------------------------------
+
+# Part 5: Prediction
+
+For prediction, we will use the movie [Arrival](https://www.rottentomatoes.com/m/arrival_2016) with a Rotten Tomatoes audience score of 82%.
+
+For this, we will need the critics score (94%), runtime (116 minutes) and IMDB rating (7.9).
+
+We start by creating a dataframe with the necessary movie properties then set up a new model using the g-prior and our previously selected variables. 
+
+Finally, this is passed to the `predict` function, the prediction is in the `fit` element of the returned list object while the standard error is found in `se.pred`.
+
+```{r predict}
+movie_props <- data.frame(
+    imdb_rating = 7.9, 
+    critics_score = 94, 
+    runtime = 116
+    )
+
+movies.g_prior = bas.lm(audience_score ~ imdb_rating + critics_score + runtime, 
+                       data = movies2,
+                       alpha=3, 
+                       prior="g-prior"
+                       )
+
+prediction <- predict(movies.g_prior, newdata=movie_props, estimator="BPM", se.fit=T)
+as.numeric(prediction$fit)
+as.numeric(prediction$se.pred)
+```
+
+The model predicts an audience score of `r round(prediction$fit)`%. 
+
+More specifically, at the 95% credible interval, the model predicts that a movie with these attributes will have an audience score of `r round(as.numeric(prediction$fit))` $\pm$ `r round(1.96 * prediction$se.pred, 1)`%.
+
+ 
+
+------------------------------------------------------------------------
+
+# Part 6: Conclusion
+
+We have created a Bayesian Multilinear Regression model using the Zellner-Siow prior with the Markov Chain Monte Carlo method and a uniform model prior.
+
+The fitted model was selected using the Best Predictive approach and employed just 3 of the original 16 variables: runtime, IMDB rating, critic's score to predict a Rotten Tomatoes audience rating.
+
+While the predicted value (80%) is very close to the actual value (82%), the large standard error makes this somewhat meaningless. To reduce the standard error, we would need a much larger sample size than 650 observations (since the precision g is proportional to the sample size).
+
+On a final note, using IMDB rating and critic's score to predict an audience rating doesn't have much value as the movie needs to be already released and rated by critics and members of the public. A model as a predictive tool for unreleased movies would need to take these two variables out of consideration when constructing the model.
+\
+\
+\
+\
+
+----
+
+\
+\
+\
+\
+
 
